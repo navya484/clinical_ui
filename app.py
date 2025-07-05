@@ -1,44 +1,124 @@
 import streamlit as st
-from test4 import transcribe_audio
-from main import extract_medical_entities
-from main import generate_soap_note
+from main import whisper_model, ner, model, contract, web3, collection, datetime, Account
+from main import transcript as static_transcript  # only used if no audio uploaded
+import tempfile
+import os
 
-st.set_page_config(page_title="Clinical AI", layout="centered")
-
+# Page Config
+st.set_page_config(page_title="🩺 AI Clinical Documentation", layout="centered")
 st.title("🩺 AI-Powered Clinical Documentation")
+st.markdown("Upload a doctor-patient audio conversation to auto-generate clinical SOAP notes using AI.")
 
-# Step 1: Input Section
-st.header("Step 1: Upload or Enter Patient Conversation")
+# Audio Upload
+audio_file = st.file_uploader("🎙️ Upload a patient consultation audio file (.wav/.m4a)", type=["wav", "m4a"])
 
-audio_file = st.file_uploader("Upload an audio file (.wav or .mp3 or m4a)", type=["wav", "mp3","m4a"])
-manual_text = st.text_area("Or paste conversation transcript manually:")
+if audio_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as temp_audio:
+        temp_audio.write(audio_file.read())
+        temp_path = temp_audio.name
 
-transcribed_text = ""
+    st.info("🔊 Transcribing audio using Whisper...")
+    result = whisper_model.transcribe(temp_path)
+    transcript = result["text"]
+    os.remove(temp_path)
 
-if audio_file and st.button("Transcribe Audio"):
-    with st.spinner("Transcribing audio using Whisper..."):
-        transcribed_text = transcribe_audio(audio_file)
-        st.success("Transcription Complete!")
-        st.text_area("Transcribed Text", value=transcribed_text, height=200)
+    st.subheader("📝 Transcript")
+    st.text_area("Transcribed Text", transcript, height=200)
 
-elif manual_text and st.button("Use Manual Text"):
-    transcribed_text = manual_text
+    # NER
+    st.info("🧬 Extracting medical entities...")
+    entities = ner(transcript)
+    entity_words = list(set([e['word'] for e in entities]))
 
-# Step 2: Process Text
-if transcribed_text:
-    st.header("Step 2: Extract Medical Entities and Generate Summary")
+    st.subheader("🔍 Named Medical Entities")
+    for e in entities:
+        st.markdown(f"- **{e['entity_group']}**: {e['word']} (score: {e['score']:.2f})")
 
-    with st.spinner("Running Named Entity Recognition (NER)..."):
-        entities = extract_medical_entities(transcribed_text)
+    # Summary
+    st.info("🧠 Generating summary using Gemini...")
+    prompt_summary = (
+        "Summarize the following medical entities extracted from a doctor-patient conversation. "
+        "Include patient's condition, diagnosis, and any treatment clues:\n\n"
+        f"Entities: {', '.join(entity_words)}"
+    )
+    response_summary = model.generate_content(prompt_summary)
+    summary = response_summary.text.strip()
+    st.subheader("🧠 Summary")
+    st.write(summary)
 
-    with st.expander("🔍 View Extracted Entities"):
-        for ent in entities:
-            st.markdown(f"- **{ent['entity_group']}** → `{ent['word']}` (Score: {ent['score']:.2f})")
+    # SOAP Note
+    st.info("📋 Generating SOAP note...")
+    prompt_soap = f"""
+    You are a clinical assistant.
 
-    with st.spinner("Generating SOAP-format Clinical Note..."):
-        soap_note = generate_soap_note(transcribed_text, entities)
+    Your task is to read the following unstructured transcript of a doctor-patient consultation and extract relevant medical information to generate a SOAP clinical note.
 
-    st.subheader("📝 Structured Clinical Note (SOAP Format)")
-    st.code(soap_note, language="markdown")
+    Transcript:
+    {transcript}
+
+    Return the SOAP note in the following format:
+
+    S: (Subjective)
+    O: (Objective)
+    A: (Assessment)
+    P: (Plan)
+    """
+    response_soap = model.generate_content(prompt_soap)
+    soap_text = response_soap.text.strip()
+
+    # Parse SOAP
+    soap_data = {"subjective": "", "objective": "", "assessment": "", "plan": ""}
+    for line in soap_text.splitlines():
+        if line.startswith("S:"):
+            soap_data["subjective"] = line[2:].strip()
+        elif line.startswith("O:"):
+            soap_data["objective"] = line[2:].strip()
+        elif line.startswith("A:"):
+            soap_data["assessment"] = line[2:].strip()
+        elif line.startswith("P:"):
+            soap_data["plan"] = line[2:].strip()
+
+    st.subheader("📋 SOAP Note")
+    st.markdown(f"**S (Subjective):** {soap_data['subjective']}")
+    st.markdown(f"**O (Objective):** {soap_data['objective']}")
+    st.markdown(f"**A (Assessment):** {soap_data['assessment']}")
+    st.markdown(f"**P (Plan):** {soap_data['plan']}")
+
+    # Store to Blockchain and MongoDB
+    if st.button("💾 Save Record"):
+        try:
+            patient_id = "PATIENT_" + datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            tx_hash = contract.functions.saveRecord(
+                patient_id,
+                summary,
+                soap_data["subjective"],
+                soap_data["objective"],
+                soap_data["assessment"],
+                soap_data["plan"]
+            ).transact()
+            web3.eth.wait_for_transaction_receipt(tx_hash)
+            st.success("✅ Record saved to Blockchain!")
+
+            collection.insert_one({
+                "patientId": patient_id,
+                "summary": summary,
+                "soap": soap_data,
+                "transcript": transcript,
+                "timestamp": datetime.datetime.now().isoformat()
+            })
+            st.success("✅ Record saved to MongoDB!")
+
+            st.markdown("---")
+            st.subheader("📦 Retrieved Record")
+            retrieved = contract.functions.getRecord(patient_id).call()
+            st.markdown(f"**From Blockchain:** `{patient_id}`")
+            st.text(f"Summary: {retrieved[0]}")
+            st.text(f"S: {retrieved[1]}")
+            st.text(f"O: {retrieved[2]}")
+            st.text(f"A: {retrieved[3]}")
+            st.text(f"P: {retrieved[4]}")
+            st.text(f"Timestamp: {datetime.datetime.fromtimestamp(retrieved[5])}")
+        except Exception as e:
+            st.error(f"❌ Error storing/retrieving: {e}")
 else:
-    st.info("Please upload audio or input text to begin.")
+    st.info("👆 Upload a valid audio file to begin.")
