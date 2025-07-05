@@ -1,22 +1,10 @@
-# Whisper from GitHub (for transcription)
 git+https://github.com/openai/whisper.git
-
-# Transformers for NER
-transformers
-
-# Gemini / Google Generative AI
-google-generativeai
-
-# Web3 for Blockchain
-web3
-
-# MongoDB Client
-pymongo
-
-# Audio and numeric support (optional but useful)
-ffmpeg-python
-torch
-numpy
-
-# Streamlit for UI
-streamlit
+transformers==4.38.2
+google-generativeai==0.8.5
+web3==6.16.0
+pymongo==4.6.3
+eth-account==0.10.0
+ffmpeg-python==0.2.0
+torch==2.3.0
+numpy==1.26.4
+streamlit==1.35.0
