@@ -6,35 +6,32 @@ from web3 import Web3
 from pymongo import MongoClient
 import datetime
 from pprint import pprint
-from eth_account import Account
 
 # 🎙️ Step 1: Transcribe audio with Whisper
-sys.stdout.reconfigure(encoding='utf-8')  # for emojis and unicode
+sys.stdout.reconfigure(encoding='utf-8')
 
 print("🔊 Transcribing audio...")
-whisper_model = whisper.load_model("base")  # or "tiny"
-result = whisper_model.transcribe("test4.m4a")  # replace with your file
+whisper_model = whisper.load_model("base")
+result = whisper_model.transcribe("test4.m4a")
 transcript = result["text"]
 
 print("\n📝 Transcript:\n")
 print(transcript)
 
-# 🧬 Step 2: Load Biomedical NER pipeline
+# 🧬 Step 2: NER
 ner = pipeline("ner", model="d4data/biomedical-ner-all", aggregation_strategy="simple")
-
-# 🧠 Step 3: Perform NER
 entities = ner(transcript)
-entity_words = list(set([e['word'] for e in entities]))  # dedup
+entity_words = list(set([e['word'] for e in entities]))
 
 print("\n🔍 Extracted Entities:")
 for entity in entities:
     print(f"{entity['entity_group']} → {entity['word']} (Score: {entity['score']:.2f})")
 
-# 💡 Step 4: Gemini Setup
-genai.configure(api_key="AIzaSyA286T4FaYw2MMpfUxxp6eQWQRhr8RblMg")  # 🔐 Replace with your Gemini API Key
+# 💡 Step 3: Gemini
+genai.configure(api_key="AIzaSyA286T4FaYw2MMpfUxxp6eQWQRhr8RblMg")
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-# ✍️ Step 5: Generate Summary
+# Summary
 prompt_summary = (
     "Summarize the following medical entities extracted from a doctor-patient conversation. "
     "Include patient's condition, diagnosis, and any treatment clues:\n\n"
@@ -46,7 +43,7 @@ summary = response_summary.text.strip()
 print("\n🧠 Summary:")
 print(summary)
 
-# 📋 Step 6: Generate SOAP
+# SOAP note
 prompt_soap = f"""
 You are a clinical assistant.
 
@@ -91,15 +88,25 @@ for line in soap_note_text.splitlines():
 ganache_url = "http://127.0.0.1:7545"
 web3 = Web3(Web3.HTTPProvider(ganache_url))
 assert web3.is_connected(), "❌ Could not connect to Ganache"
-private_key = "0x58ead8eccbd6d982996e3bfafa0b032c99cf6408fc2d9c9c64be51c2071c96d1"
-account = Account.from_key(private_key)
-address = account.address
-contract_address = Web3.to_checksum_address("0x1C03cb546054d8d867b5F585c945f0C15EFbaf7c")
+
+# Use first account from Ganache (no private key needed)
+address = web3.eth.accounts[0]
+
+contract_address = Web3.to_checksum_address("0x21a2Bbdad8d810a6E9690Bc45D3A88b747CF477e")
 contract_abi = [
     {
-        "inputs": [],
+        "inputs": [
+            {"internalType": "string", "name": "_patientId", "type": "string"},
+            {"internalType": "string", "name": "_summary", "type": "string"},
+            {"internalType": "string", "name": "_subjective", "type": "string"},
+            {"internalType": "string", "name": "_objective", "type": "string"},
+            {"internalType": "string", "name": "_assessment", "type": "string"},
+            {"internalType": "string", "name": "_plan", "type": "string"}
+        ],
+        "name": "saveRecord",
+        "outputs": [],
         "stateMutability": "nonpayable",
-        "type": "constructor"
+        "type": "function"
     },
     {
         "inputs": [
@@ -115,29 +122,6 @@ contract_abi = [
             {"internalType": "uint256", "name": "timestamp", "type": "uint256"}
         ],
         "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "hospitalOwner",
-        "outputs": [
-            {"internalType": "address", "name": "", "type": "address"}
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {"internalType": "string", "name": "_patientId", "type": "string"},
-            {"internalType": "string", "name": "_summary", "type": "string"},
-            {"internalType": "string", "name": "_subjective", "type": "string"},
-            {"internalType": "string", "name": "_objective", "type": "string"},
-            {"internalType": "string", "name": "_assessment", "type": "string"},
-            {"internalType": "string", "name": "_plan", "type": "string"}
-        ],
-        "name": "saveRecord",
-        "outputs": [],
-        "stateMutability": "nonpayable",
         "type": "function"
     }
 ]
@@ -160,13 +144,14 @@ try:
         soap_data["objective"],
         soap_data["assessment"],
         soap_data["plan"]
-    ).transact()
+    ).transact({"from": address})  # No private key needed here
 
     web3.eth.wait_for_transaction_receipt(tx_hash)
     print("✅ SOAP record stored on blockchain.")
 except Exception as e:
     print("❌ Blockchain store failed:", e)
 
+# Save to MongoDB
 mongo_record = {
     "patientId": patient_id,
     "summary": summary,
@@ -176,6 +161,7 @@ mongo_record = {
 }
 collection.insert_one(mongo_record)
 print("✅ Record saved to MongoDB.")
+print("🆔 Patient ID:", patient_id)
 
 # ----------------- Retrieve and Display -----------------
 print("\n🔁 Retrieving record from blockchain...")
