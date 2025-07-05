@@ -10,7 +10,7 @@ st.title("🩺 AI-Powered Clinical Documentation")
 # Step 1: Input Section
 st.header("Step 1: Upload or Enter Patient Conversation")
 
-audio_file = st.file_uploader("Upload an audio file (.wav or .mp3)", type=["wav", "mp3","m4a"])
+audio_file = st.file_uploader("Upload an audio file (.wav or .mp3 or m4a)", type=["wav", "mp3","m4a"])
 manual_text = st.text_area("Or paste conversation transcript manually:")
 
 transcribed_text = ""
