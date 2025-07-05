@@ -1,5 +1,5 @@
 import streamlit as st
-from main import transcribe_audio
+from test4 import transcribe_audio
 from main import extract_medical_entities
 from main import generate_soap_note
 
