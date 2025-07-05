@@ -1,7 +1,7 @@
 import streamlit as st
-from whisper_utils import transcribe_audio
-from ner_utils import extract_medical_entities
-from summary_utils import generate_soap_note
+from main import transcribe_audio
+from main import extract_medical_entities
+from main import generate_soap_note
 
 st.set_page_config(page_title="Clinical AI", layout="centered")
 
